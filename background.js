@@ -103,8 +103,14 @@ chrome.action.onClicked.addListener(async (tab) => {
         try {
           if (!document.hasFocus()) window.focus();
           const res = await fetch(dataUrl);
-          const blob = await res.blob();
-          const item = new ClipboardItem({ "image/png": blob });
+          const rawBlob = await res.blob();
+
+          // CRITICAL FIX: explicitly Reconstruct the blob to force the exact MIME type.
+          // Otherwise, certain apps (like Windows Clipboard/Explorer) might default to treating 
+          // unstructured binary data as a generic file and randomly assign an .mp3 extension.
+          const imgBlob = new Blob([rawBlob], { type: "image/png" });
+
+          const item = new ClipboardItem({ "image/png": imgBlob });
           await navigator.clipboard.write([item]);
           return true;
         } catch (e) {
