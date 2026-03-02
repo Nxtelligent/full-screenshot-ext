@@ -80,10 +80,10 @@ chrome.action.onClicked.addListener(async (tab) => {
       },
     });
 
-    // Send tiles to offscreen document for stitching + clipboard
+    // Send tiles to offscreen document for stitching
     await ensureOffscreenDocument();
 
-    await chrome.runtime.sendMessage({
+    const response = await chrome.runtime.sendMessage({
       action: "stitch-and-copy",
       tiles,
       fullWidth: viewportWidth * devicePixelRatio,
@@ -91,6 +91,33 @@ chrome.action.onClicked.addListener(async (tab) => {
       viewportHeight: viewportHeight * devicePixelRatio,
       devicePixelRatio,
     });
+
+    if (!response) throw new Error("No response from offscreen document");
+    if (!response.success) throw new Error(response.error || "Failed to stitch image");
+
+    // Inject content script into active tab to write the Data URL to clipboard
+    // This bypasses the "Document is not focused" DOMException in offscreen documents
+    const injectionResults = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: async (dataUrl) => {
+        try {
+          if (!document.hasFocus()) window.focus();
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
+          const item = new ClipboardItem({ "image/png": blob });
+          await navigator.clipboard.write([item]);
+          return true;
+        } catch (e) {
+          throw new Error("Clipboard write failed: " + e.toString());
+        }
+      },
+      args: [response.dataUrl],
+    });
+
+    const success = injectionResults[0]?.result;
+    if (success !== true) {
+      throw new Error("Content script clipboard write failed");
+    }
 
     showBadge("✓", "#27ae60", 2000);
   } catch (err) {
@@ -101,18 +128,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-// Listen for completion message from offscreen
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === "copy-complete") {
-    showBadge("✓", "#27ae60", 2000);
-    sendResponse({ ok: true });
-  } else if (msg.action === "copy-failed") {
-    console.error("Clipboard write failed:", msg.error);
-    showBadge("✗", "#e74c3c", 2000);
-    sendResponse({ ok: false });
-  }
-  return false;
-});
+
 
 // --- Helpers ---
 

@@ -3,12 +3,12 @@
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "stitch-and-copy") {
     handleStitchAndCopy(msg)
-      .then(() => {
-        chrome.runtime.sendMessage({ action: "copy-complete" });
+      .then((dataUrl) => {
+        sendResponse({ success: true, dataUrl });
       })
       .catch((err) => {
-        console.error("Stitch/copy error:", err);
-        chrome.runtime.sendMessage({ action: "copy-failed", error: err.message });
+        console.error("Stitch error:", err);
+        sendResponse({ success: false, error: err.message });
       });
     return true;
   }
@@ -78,11 +78,8 @@ async function handleStitchAndCopy({ tiles, fullWidth, fullHeight, viewportHeigh
     }
   }
 
-  // Write to clipboard
-  const blob = await canvasToBlob(canvas, "image/png");
-  const clipboardItem = new ClipboardItem({ "image/png": blob });
-  await navigator.clipboard.write([clipboardItem]);
-  console.log("Full screenshot copied to clipboard (" + canvasWidth + "x" + canvasHeight + ")");
+  // Return data URL to background script for clipboard writing
+  return canvas.toDataURL("image/png");
 }
 
 function loadImage(dataUrl) {
@@ -91,17 +88,5 @@ function loadImage(dataUrl) {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Failed to load tile image"));
     img.src = dataUrl;
-  });
-}
-
-function canvasToBlob(canvas, type) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error("Canvas toBlob returned null — image may be too large"));
-      },
-      type
-    );
   });
 }
