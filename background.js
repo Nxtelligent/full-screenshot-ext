@@ -101,12 +101,25 @@ chrome.action.onClicked.addListener(async (tab) => {
       target: { tabId: tab.id },
       func: async (dataUrl) => {
         try {
+          // 1) Trigger a local download
+          const dateStr = new Date().toISOString().replace(/[:.]/g, "-");
+          const filename = `full-page-screenshot-${dateStr}.png`;
+
+          const a = document.createElement("a");
+          a.style.display = "none";
+          a.href = dataUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+
+          // 2) Copy to clipboard
           if (!document.hasFocus()) window.focus();
           const res = await fetch(dataUrl);
           const rawBlob = await res.blob();
 
           // CRITICAL FIX: explicitly Reconstruct the blob to force the exact MIME type.
-          // Otherwise, certain apps (like Windows Clipboard/Explorer) might default to treating 
+          // Otherwise, certain apps (like Windows Clipboard/Explorer) might default to treating
           // unstructured binary data as a generic file and randomly assign an .mp3 extension.
           const imgBlob = new Blob([rawBlob], { type: "image/png" });
 
@@ -114,7 +127,7 @@ chrome.action.onClicked.addListener(async (tab) => {
           await navigator.clipboard.write([item]);
           return true;
         } catch (e) {
-          throw new Error("Clipboard write failed: " + e.toString());
+          throw new Error("Screenshot save/copy failed: " + e.toString());
         }
       },
       args: [response.dataUrl],
