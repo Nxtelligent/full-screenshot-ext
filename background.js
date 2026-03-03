@@ -101,18 +101,6 @@ chrome.action.onClicked.addListener(async (tab) => {
       target: { tabId: tab.id },
       func: async (dataUrl) => {
         try {
-          // 1) Trigger a local download
-          const dateStr = new Date().toISOString().replace(/[:.]/g, "-");
-          const filename = `full-page-screenshot-${dateStr}.png`;
-
-          const a = document.createElement("a");
-          a.style.display = "none";
-          a.href = dataUrl;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-
           // 2) Copy to clipboard
           if (!document.hasFocus()) window.focus();
           const res = await fetch(dataUrl);
@@ -137,6 +125,16 @@ chrome.action.onClicked.addListener(async (tab) => {
     if (success !== true) {
       throw new Error("Content script clipboard write failed");
     }
+
+    // After a successful clipboard copy, trigger the download from the background script
+    const dateStr = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `full-page-screenshot-${dateStr}.png`;
+
+    await chrome.downloads.download({
+      url: response.dataUrl,
+      filename: filename,
+      saveAs: false
+    });
 
     showBadge("✓", "#27ae60", 2000);
   } catch (err) {
