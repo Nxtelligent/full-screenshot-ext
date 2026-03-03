@@ -95,6 +95,16 @@ chrome.action.onClicked.addListener(async (tab) => {
     if (!response) throw new Error("No response from offscreen document");
     if (!response.success) throw new Error(response.error || "Failed to stitch image");
 
+    // Start the download immediately. Even if clipboard fails, the user gets the file.
+    const dateStr = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `full-page-screenshot-${dateStr}.png`;
+
+    await chrome.downloads.download({
+      url: response.dataUrl,
+      filename: filename,
+      saveAs: false
+    });
+
     // Inject content script into active tab to write the Data URL to clipboard
     // This bypasses the "Document is not focused" DOMException in offscreen documents
     const injectionResults = await chrome.scripting.executeScript({
@@ -103,13 +113,17 @@ chrome.action.onClicked.addListener(async (tab) => {
         try {
           // 2) Copy to clipboard
           if (!document.hasFocus()) window.focus();
-          const res = await fetch(dataUrl);
-          const rawBlob = await res.blob();
 
-          // CRITICAL FIX: explicitly Reconstruct the blob to force the exact MIME type.
-          // Otherwise, certain apps (like Windows Clipboard/Explorer) might default to treating
-          // unstructured binary data as a generic file and randomly assign an .mp3 extension.
-          const imgBlob = new Blob([rawBlob], { type: "image/png" });
+          // Convert Data URL to Blob manually to bypass strict CSPs that block fetch()
+          const parts = dataUrl.split(',');
+          const mime = parts[0].match(/:(.*?);/)[1];
+          const bstr = atob(parts[1]);
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          const imgBlob = new Blob([u8arr], { type: mime });
 
           const item = new ClipboardItem({ "image/png": imgBlob });
           await navigator.clipboard.write([item]);
@@ -123,18 +137,8 @@ chrome.action.onClicked.addListener(async (tab) => {
 
     const success = injectionResults[0]?.result;
     if (success !== true) {
-      throw new Error("Content script clipboard write failed");
+      console.warn("Content script clipboard write failed or unsupported.");
     }
-
-    // After a successful clipboard copy, trigger the download from the background script
-    const dateStr = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `full-page-screenshot-${dateStr}.png`;
-
-    await chrome.downloads.download({
-      url: response.dataUrl,
-      filename: filename,
-      saveAs: false
-    });
 
     showBadge("✓", "#27ae60", 2000);
   } catch (err) {
