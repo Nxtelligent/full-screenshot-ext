@@ -95,49 +95,43 @@ chrome.action.onClicked.addListener(async (tab) => {
     if (!response) throw new Error("No response from offscreen document");
     if (!response.success) throw new Error(response.error || "Failed to stitch image");
 
-    // Start the download immediately. Even if clipboard fails, the user gets the file.
-    const dateStr = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `full-page-screenshot-${dateStr}.png`;
+    try {
+      // Inject content script into active tab to write the Data URL to clipboard
+      // This bypasses the "Document is not focused" DOMException in offscreen documents
+      const injectionResults = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: async (dataUrl) => {
+          try {
+            // 2) Copy to clipboard
+            if (!document.hasFocus()) window.focus();
 
-    await chrome.downloads.download({
-      url: response.dataUrl,
-      filename: filename,
-      saveAs: false
-    });
+            // Convert Data URL to Blob manually to bypass strict CSPs that block fetch()
+            const parts = dataUrl.split(',');
+            const mime = parts[0].match(/:(.*?);/)[1];
+            const bstr = atob(parts[1]);
+            let n = bstr.length;
+            const u8arr = new Uint8Array(n);
+            while (n--) {
+              u8arr[n] = bstr.charCodeAt(n);
+            }
+            const imgBlob = new Blob([u8arr], { type: mime });
 
-    // Inject content script into active tab to write the Data URL to clipboard
-    // This bypasses the "Document is not focused" DOMException in offscreen documents
-    const injectionResults = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: async (dataUrl) => {
-        try {
-          // 2) Copy to clipboard
-          if (!document.hasFocus()) window.focus();
-
-          // Convert Data URL to Blob manually to bypass strict CSPs that block fetch()
-          const parts = dataUrl.split(',');
-          const mime = parts[0].match(/:(.*?);/)[1];
-          const bstr = atob(parts[1]);
-          let n = bstr.length;
-          const u8arr = new Uint8Array(n);
-          while (n--) {
-            u8arr[n] = bstr.charCodeAt(n);
+            const item = new ClipboardItem({ "image/png": imgBlob });
+            await navigator.clipboard.write([item]);
+            return true;
+          } catch (e) {
+            throw new Error("Screenshot copy failed: " + e.toString());
           }
-          const imgBlob = new Blob([u8arr], { type: mime });
+        },
+        args: [response.dataUrl],
+      });
 
-          const item = new ClipboardItem({ "image/png": imgBlob });
-          await navigator.clipboard.write([item]);
-          return true;
-        } catch (e) {
-          throw new Error("Screenshot save/copy failed: " + e.toString());
-        }
-      },
-      args: [response.dataUrl],
-    });
-
-    const success = injectionResults[0]?.result;
-    if (success !== true) {
-      console.warn("Content script clipboard write failed or unsupported.");
+      const success = injectionResults[0]?.result;
+      if (success !== true) {
+        console.warn("Content script clipboard write failed or unsupported.");
+      }
+    } catch (clipboardErr) {
+      console.warn("Clipboard copy skipped (Data URI might be too large for IPC or CSP blocked execution): ", clipboardErr);
     }
 
     showBadge("✓", "#27ae60", 2000);

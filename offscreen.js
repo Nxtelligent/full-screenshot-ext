@@ -78,6 +78,31 @@ async function handleStitchAndCopy({ tiles, fullWidth, fullHeight, viewportHeigh
     }
   }
 
+  // Create a Blob to trigger the download directly from the offscreen document
+  // This completely bypasses Chrome's size limits for downloading Data URIs.
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => {
+        if (b) resolve(b);
+        else reject(new Error("Canvas toBlob returned null — image may be too large"));
+      },
+      "image/png"
+    );
+  });
+
+  const blobUrl = URL.createObjectURL(blob);
+  const dateStr = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `full-page-screenshot-${dateStr}.png`;
+
+  chrome.downloads.download({
+    url: blobUrl,
+    filename: filename,
+    saveAs: false
+  }, () => {
+    // Revoke object URL after a short delay to free memory
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  });
+
   // Return data URL to background script for clipboard writing
   return canvas.toDataURL("image/png");
 }
